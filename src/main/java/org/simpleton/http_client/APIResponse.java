@@ -43,10 +43,12 @@ public class APIResponse {
     }
     
     public APIResponse(StringBuilder response) { 
+    	this.responseHeader = new HashMap<>();
     	this.response = response;
 	}
 
 	public APIResponse(Status status) { 
+		this.responseHeader = new HashMap<>();
 		this.status = Optional.ofNullable(status);
 	}
 
@@ -72,8 +74,10 @@ public class APIResponse {
     }
 
     public Optional<JSONObject> responseInJSON() {
-    	String responseString = response.toString();
-    	if(null == responseString) {
+    	if(null == response) {
+    		return Optional.empty();
+    	}
+    	if(!JsonUtil.isValidJsonObject(response.toString())) {
     		return Optional.empty();
     	}
         return Optional.ofNullable(new JSONObject(response.toString()));

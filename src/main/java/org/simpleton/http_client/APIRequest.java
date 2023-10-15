@@ -37,7 +37,7 @@ import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 
+ * Base http request wrapper class
  * @author tariqul :: Mar 9, 2023 :: 2:01:23 AM 
  *
  */
@@ -46,17 +46,21 @@ import lombok.extern.slf4j.Slf4j;
 public class APIRequest {
 
 	private String url;
+	private Optional<URIBuilder> uri;
 	private Map<String, String> headers;
 	private Map<String, String> queryParams;
 	private Map<String, String> formParams;
 	private List<String> pathParams;
+	private HttpClientConfig httpClientConfig;
 
     public APIRequest(final String url) {
     	this.url = url;
+    	this.uri = Optional.empty();
     	this.queryParams = new HashMap<>();
     	this.formParams = new HashMap<>();
     	this.headers = new HashMap<>(); 
     	this.pathParams = new ArrayList<>();
+    	this.httpClientConfig = HttpClientConfig.builder().build();
     }
     
     public static APIRequest of(final String url) {
@@ -65,6 +69,13 @@ public class APIRequest {
     
     public APIRequest pathParam(final String pathParam) {
         this.pathParams.add(pathParam);
+        return this;
+    }
+    
+    public APIRequest pathParam(String... pathParamArray) {
+    	for(String pathParam:pathParamArray) {
+    		  this.pathParams.add(pathParam);
+    	}
         return this;
     }
 
@@ -83,46 +94,72 @@ public class APIRequest {
         return this;
     }
     
-    private Optional<URIBuilder> baseURIBuilder() { 
-    	
+    private void baseURIBuilder() { 
     	try {
-    		 return Optional.ofNullable(new URIBuilder(this.url));
+    		 this.uri = Optional.ofNullable(new URIBuilder(this.url));
 		} catch (Exception e) {
 			log.error("BaseURIBuilder Error ", e); 
 		}
-    	
-		return Optional.empty(); 
-    	
     }
     
+    /**
+     * This method to use initialize <code>CloseableHttpClient</code>
+     * @return <code>CloseableHttpClient</code> instance
+     */
     private CloseableHttpClient initClient() {
     	RequestConfig config = RequestConfig.custom()
-    			  .setConnectTimeout(HttpClientConfig.CONNECT_TIMEOUT * 1000)
-    			  .setConnectionRequestTimeout(HttpClientConfig.CONNECTION_REQUEST_TIMEOUT * 1000)
-    			  .setSocketTimeout(HttpClientConfig.SOCKET_TIMEOUT * 1000).build();
+    			  .setConnectTimeout(httpClientConfig.getConnectTimeout() * 1000)
+    			  .setConnectionRequestTimeout(httpClientConfig.getConnectionRequestTimeout() * 1000)
+    			  .setSocketTimeout(httpClientConfig.getSocketTimeout() * 1000).build();
 		return HttpClientBuilder.create().setDefaultRequestConfig(config).build(); 
-    	
+    }
+    
+    private void appendPathParams() {
+    	this.uri.get().setPathSegments(pathParams);
+    }
+    
+    private void appendQueryParams() {
+    	 for (Map.Entry<String, String> entry : this.queryParams.entrySet()) { 
+         	this.uri.get().addParameter(entry.getKey(), entry.getValue());
+         }
+    }
+    
+    private HttpGet appendHeaderToHttpGet(HttpGet get) { 
+    	 for (Map.Entry<String, String> entry : this.headers.entrySet()) {
+             get.addHeader(entry.getKey(), entry.getValue());
+         }
+    	 return get;
+    }
+    
+    private HttpPost appendHeaderToHttpPost(HttpPost post) { 
+   	 	for (Map.Entry<String, String> entry : this.headers.entrySet()) {
+   	 		post.addHeader(entry.getKey(), entry.getValue());
+        }
+   	 	return post;
+    }
+    
+    private HttpDelete appendHeaderToHttpDelete(HttpDelete delete) { 
+   	 	for (Map.Entry<String, String> entry : this.headers.entrySet()) {
+   	 		delete.addHeader(entry.getKey(), entry.getValue());
+        }
+   	 	return delete;
     }
 
     public APIResponse get(){
 
-        Optional<URIBuilder> uri = baseURIBuilder(); 
+        baseURIBuilder(); 
         
-        if(!uri.isPresent()) {
+        if(!this.uri.isPresent()) {
         	return new APIResponse(new StringBuilder("Invalid Base Url."));
         }
+         
+        appendPathParams();
+ 
+        appendQueryParams();
         
-        uri.get().setPathSegments(pathParams);
-
-        for (Map.Entry<String, String> entry : queryParams.entrySet()) { 
-            uri.get().addParameter(entry.getKey(), entry.getValue());
-        }
+        HttpGet get = new HttpGet(this.uri.get().toString());
         
-        HttpGet get = new HttpGet(uri.get().toString());
-        
-        for (Map.Entry<String, String> entry : headers.entrySet()) {
-            get.addHeader(entry.getKey(), entry.getValue());
-        }
+        get = appendHeaderToHttpGet(get);
 
         APIResponse response = new APIResponse();
 
@@ -138,23 +175,19 @@ public class APIRequest {
 
     public APIResponse postURL() {
 
-    	Optional<URIBuilder> uri = baseURIBuilder(); 
+    	baseURIBuilder(); 
     	
-    	if(!uri.isPresent()) {
+    	if(!this.uri.isPresent()) {
          	return new APIResponse(new StringBuilder("Invalid Base Url."));
         }
     	 
-    	uri.get().setPathSegments(pathParams);
+    	appendPathParams();
+    	 
+        appendQueryParams();
 
-        for (Map.Entry<String, String> entry : queryParams.entrySet()) {
-            uri.get().addParameter(entry.getKey(), entry.getValue());
-        }
+        HttpPost post = new HttpPost(this.uri.get().toString());
 
-        HttpPost post = new HttpPost(uri.get().toString());
-
-        for (Map.Entry<String, String> entry : headers.entrySet()) {
-            post.addHeader(entry.getKey(), entry.getValue());
-        }
+        post = appendHeaderToHttpPost(post);
 
         APIResponse response = new APIResponse();
 
@@ -170,29 +203,25 @@ public class APIRequest {
 
     public APIResponse postForm() {
     	
-    	Optional<URIBuilder> uri = baseURIBuilder(); 
+    	baseURIBuilder(); 
     	
-    	if(!uri.isPresent()) {
+    	if(!this.uri.isPresent()) {
          	return new APIResponse(new StringBuilder("Invalid Base Url."));
         }
     	
-    	uri.get().setPathSegments(pathParams);
-    	
-    	for (Map.Entry<String, String> entry : queryParams.entrySet()) {
-    		uri.get().addParameter(entry.getKey(), entry.getValue());
-    	}
+    	appendPathParams();
+   	 
+        appendQueryParams();
 
-        HttpPost post = new HttpPost(uri.get().toString());
+        HttpPost post = new HttpPost(this.uri.get().toString());
         
         List<NameValuePair> formParameters = new ArrayList<>();
 
-        for (Map.Entry<String, String> entry : formParams.entrySet()) {
+        for (Map.Entry<String, String> entry : this.formParams.entrySet()) {
         	formParameters.add(new BasicNameValuePair(entry.getKey(), entry.getValue()));
         }
 
-        for (Map.Entry<String, String> entry : headers.entrySet()) {
-            post.addHeader(entry.getKey(), entry.getValue());
-        }
+        post = appendHeaderToHttpPost(post);
 
         post.setEntity(new UrlEncodedFormEntity(formParameters, StandardCharsets.UTF_8));
 
@@ -211,23 +240,19 @@ public class APIRequest {
     
     public APIResponse delete() {
     	
-    	Optional<URIBuilder> uri = baseURIBuilder(); 
+    	baseURIBuilder(); 
     	
-    	if(!uri.isPresent()) {
+    	if(!this.uri.isPresent()) {
          	return new APIResponse(new StringBuilder("Invalid Base Url."));
         }
     	
-    	uri.get().setPathSegments(pathParams);
-
-        for (Map.Entry<String, String> entry : queryParams.entrySet()) {
-            uri.get().addParameter(entry.getKey(), entry.getValue());
-        }
+    	appendPathParams();
+      	 
+        appendQueryParams();
 
         HttpDelete delete = new HttpDelete(uri.get().toString()); 
 
-        for (Map.Entry<String, String> entry : headers.entrySet()) {
-            delete.addHeader(entry.getKey(), entry.getValue());
-        }
+        delete = appendHeaderToHttpDelete(delete);
 
         APIResponse response = new APIResponse();
 
@@ -243,27 +268,25 @@ public class APIRequest {
     
     public APIResponse patch() throws Exception {
     	
-    	Optional<URIBuilder> uri = baseURIBuilder(); 
+    	baseURIBuilder(); 
     	
-    	if(!uri.isPresent()) {
+    	if(!this.uri.isPresent()) {
          	return new APIResponse(new StringBuilder("Invalid Base Url."));
         }
     	
-    	uri.get().setPathSegments(pathParams);
+    	appendPathParams();
+     	 
+        appendQueryParams();
 
-        for (Map.Entry<String, String> entry : queryParams.entrySet()) {
-            uri.get().addParameter(entry.getKey(), entry.getValue());
-        }
-
-        HttpPatch patch = new HttpPatch(uri.get().toString());
+        HttpPatch patch = new HttpPatch(this.uri.get().toString());
 
         List<NameValuePair> formParameters = new ArrayList<>();
 
-        for (Map.Entry<String, String> entry : formParams.entrySet()) {
+        for (Map.Entry<String, String> entry : this.formParams.entrySet()) {
         	formParameters.add(new BasicNameValuePair(entry.getKey(), entry.getValue()));
         }
 
-        for (Map.Entry<String, String> entry : headers.entrySet()) {
+        for (Map.Entry<String, String> entry : this.headers.entrySet()) {
             patch.addHeader(entry.getKey(), entry.getValue()); 
         }
 
@@ -282,18 +305,26 @@ public class APIRequest {
     }
 
     public APIResponse postJSON() throws Exception {
+    	
+    	baseURIBuilder(); 
+    	
+    	if(!this.uri.isPresent()) {
+         	return new APIResponse(new StringBuilder("Invalid Base Url."));
+        }
+    	
+    	appendPathParams();
+    	 
+        appendQueryParams();
 
-        HttpPost post = new HttpPost(this.url);
+        HttpPost post = new HttpPost(this.uri.get().toString());
 
         JSONObject paramJSON = new JSONObject();
 
-        for (Map.Entry<String, String> entry : queryParams.entrySet()) {
+        for (Map.Entry<String, String> entry : formParams.entrySet()) {
             paramJSON.put(entry.getKey(), entry.getValue());
         }
 
-        for (Map.Entry<String, String> entry : headers.entrySet()) {
-            post.addHeader(entry.getKey(), entry.getValue());
-        }
+        post = appendHeaderToHttpPost(post);
 
         post.setEntity(new StringEntity(paramJSON.toString(), "utf-8"));
 
@@ -302,7 +333,7 @@ public class APIRequest {
         APIResponse response = null;
 
         try {
-            response = this.process(client, post);
+            response = this.processPostRequest(client, post);
         } finally {
 
             if (client != null) {
@@ -314,22 +345,30 @@ public class APIRequest {
         return response;
     }
     
-    public APIResponse postJSON(JSONObject requestBody) throws Exception {
-
-        HttpPost post = new HttpPost(this.url);
-
-
-        for (Map.Entry<String, String> entry : headers.entrySet()) {
-            post.addHeader(entry.getKey(), entry.getValue());
+    public APIResponse postBody(String requestBody) throws Exception {
+    	
+    	baseURIBuilder(); 
+    	
+    	if(!this.uri.isPresent()) {
+         	return new APIResponse(new StringBuilder("Invalid Base Url."));
         }
-        post.setEntity(new StringEntity(requestBody.toString(), "utf-8"));
+    	
+    	appendPathParams();
+    	 
+        appendQueryParams();
+
+        HttpPost post = new HttpPost(this.uri.get().toString());
+
+        post = appendHeaderToHttpPost(post);
+        
+        post.setEntity(new StringEntity(requestBody, "utf-8"));
 
         CloseableHttpClient client = initClient();
         
         APIResponse response = null;
 
         try {
-            response = this.process(client, post);
+            response = this.processPostRequest(client, post);
         } finally {
 
             if (client != null) {
@@ -344,15 +383,17 @@ public class APIRequest {
 
     private APIResponse processPatchRequest(CloseableHttpClient client, HttpPatch patch) throws IOException {
     	
+    	Timer timer = new Timer(true);
     	TimerTask task = new TimerTask() {
     	    @Override
     	    public void run() {
     	        if (patch != null) {
     	        	patch.abort();
-    	        }
+    	        } 
+    	        timer.cancel();
     	    }
     	};
-    	new Timer(true).schedule(task, HttpClientConfig.HARD_TIMEOUT * 1000);
+    	timer.schedule(task, httpClientConfig.getHardTimeout() * 1000);
 
         CloseableHttpResponse response = client.execute(patch);
         
@@ -373,15 +414,17 @@ public class APIRequest {
     
     private APIResponse processDeleteRequest(CloseableHttpClient client, HttpDelete delete) throws IOException {
 
+    	Timer timer = new Timer(true);
     	TimerTask task = new TimerTask() {
     	    @Override
     	    public void run() {
     	        if (delete != null) {
     	        	delete.abort();
-    	        }
+    	        } 
+    	        timer.cancel();
     	    }
     	};
-    	new Timer(true).schedule(task, HttpClientConfig.HARD_TIMEOUT * 1000);
+    	timer.schedule(task, httpClientConfig.getHardTimeout() * 1000);
     	
         CloseableHttpResponse response = client.execute(delete);
         
@@ -403,44 +446,46 @@ public class APIRequest {
     
     private APIResponse processPostRequest(CloseableHttpClient client, HttpPost post) throws IOException {
 
+    	Timer timer = new Timer(true);
+    	
     	TimerTask task = new TimerTask() {
     	    @Override
     	    public void run() {
     	        if (post != null) {
     	        	post.abort();
-    	        }
+    	        } 
+    	        timer.cancel();
     	    }
     	};
-    	new Timer(true).schedule(task, HttpClientConfig.HARD_TIMEOUT * 1000);
-    	
-        CloseableHttpResponse response = client.execute(post);
+    	timer.schedule(task, httpClientConfig.getHardTimeout() * 1000);
         
         APIResponse apiResponse = null;
 
-        try {
+        try( CloseableHttpResponse response = client.execute(post);) {
 
             apiResponse = processResponse(response);
 
-        } finally {
-            if (response != null) {
-                response.close();
-            }
-        }
+        }catch (Exception e) {
+			log.error("Error :{}", e); 
+		}
 
         return apiResponse;
     }
 
     private APIResponse processGetRequest(CloseableHttpClient client, HttpGet get){
 
+    	Timer timer = new Timer(true);
+    	
     	TimerTask task = new TimerTask() {
     	    @Override
     	    public void run() {
     	        if (get != null) {
     	        	get.abort();
-    	        }
+    	        } 
+    	        timer.cancel();
     	    }
     	};
-    	new Timer(true).schedule(task, HttpClientConfig.HARD_TIMEOUT * 1000);
+    	timer.schedule(task, httpClientConfig.getHardTimeout() * 1000);
     	
     	APIResponse apiResponse = new APIResponse();
     	
@@ -457,7 +502,7 @@ public class APIRequest {
     private APIResponse processResponse(CloseableHttpResponse response) {
 
         APIResponse apiResponse = new APIResponse(new Status(response.getStatusLine().getStatusCode()));
-
+        
         BufferedReader bufferedReader = null;
 
         try {
@@ -501,7 +546,10 @@ public class APIRequest {
     
     public static void main(String[] args) {
     	
-    	APIRequest apiRequest = new APIRequest("https://core-api.pypepro.io/v1/contactflows/config");
+    	APIRequest apiRequest = new APIRequest("https://reqres.in");
+    	
+    	apiRequest.pathParam("api","users");
+    	apiRequest.queryParam("page", "2");
 
     	try {
     		System.out.println("Start Process"); 
