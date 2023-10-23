@@ -5,6 +5,7 @@ package org.simpleton.http_client.util;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -73,7 +74,9 @@ public class URIBuildHelper {
 	}
 
 	private void appendPathParams(URIBuilder uriBuilder) {
-		uriBuilder.getPathSegments().addAll(pathParams);
+		List<String> pathSegments = new ArrayList<>(uriBuilder.getPathSegments());
+		pathSegments.addAll(this.pathParams); 
+		uriBuilder.setPathSegments(pathSegments);
 	}
 
 	private void appendQueryParams(URIBuilder uriBuilder) {

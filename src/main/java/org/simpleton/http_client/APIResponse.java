@@ -7,7 +7,10 @@ package org.simpleton.http_client;
 
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -16,6 +19,14 @@ import java.util.regex.Pattern;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.simpleton.http_client.util.JSONUtil;
+import org.simpleton.http_client.util.StringUtil;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.type.CollectionType;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import lombok.Getter;
 import lombok.ToString;
@@ -47,7 +58,7 @@ public class APIResponse {
     @Getter
     private String contentTypeInString;
     
-    private Optional<ContentType> contentType;
+    private ContentType contentType;
     
     @Getter
     private Charset responseCharsets; 
@@ -56,26 +67,25 @@ public class APIResponse {
     	this.response = new StringBuilder();
     	this.responseHeader = new HashMap<>();
     	this.jsonUtil = new JSONUtil();
-    	this.contentType = Optional.empty();
     }
 
     public APIResponse(Status status, StringBuilder response) {
     	this.responseHeader = new HashMap<>();
         this.status = status; 
         this.response = response;
-        this.contentType = Optional.empty();
+        this.jsonUtil = new JSONUtil();
     }
     
     public APIResponse(StringBuilder response) { 
     	this.responseHeader = new HashMap<>();
     	this.response = response;
-    	this.contentType = Optional.empty();
+    	this.jsonUtil = new JSONUtil();
 	}
 
 	public APIResponse(Status status) { 
 		this.responseHeader = new HashMap<>();
 		this.status = status;
-		this.contentType = Optional.empty();
+		this.jsonUtil = new JSONUtil();
 	}
 
 	public APIResponse responseHeader(String key, String value) {
@@ -126,15 +136,23 @@ public class APIResponse {
         return responseJSONObject;
     }
     
-    public Optional<String> responseAsString() {
+    public String responseAsString() {
     	if(null == response) {
     		log.error(Constant.ERROR_LEVEL, "Response is empty");
-    		return Optional.empty();
+    		return "";
     	}
-        return Optional.ofNullable(response.toString()); 
+        return response.toString(); 
     }
     
-    public Optional<ContentType> getContentType() {
+    public boolean isJSONObject() {
+    	return jsonUtil.isValidJsonObject(response.toString());
+    }
+    
+    public boolean isJSONArray() {
+    	return jsonUtil.isValidJsonArray(response.toString());
+    }
+    
+    public ContentType getContentType() {
 		return this.contentType;
     }
     
@@ -149,7 +167,7 @@ public class APIResponse {
         if (contentTypeMatcher.find()) {
             String parsedContentType = contentTypeMatcher.group(1).trim();
             ContentType responseContentType = ContentType.valueOfIgnoreCase(parsedContentType);
-        	this.contentType = Optional.ofNullable(responseContentType);
+        	this.contentType = responseContentType;
         }
         // Extract charset
         if (charsetMatcher.find()) {
@@ -157,6 +175,7 @@ public class APIResponse {
             mapCharsets(charset); 
         }
     }
+    
     
     private void mapCharsets(String charset) {
     	if (StandardCharsets.ISO_8859_1.name().equalsIgnoreCase(charset)) {
@@ -178,6 +197,123 @@ public class APIResponse {
     	log.info("response :: {} ", response.toString()); 
     	log.info("responseHeader :: {} ", responseHeader); 
     }
+    
+    public <T> List<T> toDtos(String key, Class<T> clazz) {
+    	if(StringUtil.isBlank(key)) {
+    		return Collections.emptyList();
+    	}
+    	JSONObject responseJsonObject = null;
+    	if(contentType.isJSONType() && isJSONObject()) {
+    		Optional<JSONObject> responseASJsonObject = responseAsJSONObject();
+    		responseJsonObject = responseASJsonObject.isPresent() ? responseASJsonObject.get() : null; 
+    	}
+    	if(responseJsonObject == null) {
+    		return Collections.emptyList();
+		}
+    	if(!responseJsonObject.has(key) || !(responseJsonObject.get(key) instanceof JSONArray)) {
+    		return Collections.emptyList();
+    	}
+    	
+    	JSONArray data = responseJsonObject.getJSONArray(key);
+    	ObjectMapper objectMapper = new ObjectMapper();
+		objectMapper.registerModule(new JavaTimeModule());
+		objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+		objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+		
+		try {
+			CollectionType listType = objectMapper.getTypeFactory().constructCollectionType(ArrayList.class, clazz);
+			return  objectMapper.readValue(data.toString(), listType);
+		} catch (Exception e) { 
+			log.error(Constant.ERROR_LEVEL, e);
+		}
+		
+    	return Collections.emptyList(); 
+    }
+    
+    public <T> T toDto(String key, Class<T> clazz) {
+    	if(StringUtil.isBlank(key)) {
+    		return null;
+    	}
+    	JSONObject responseJsonObject = null;
+    	if(contentType.isJSONType() && isJSONObject()) {
+    		Optional<JSONObject> responseASJsonObject = responseAsJSONObject();
+    		responseJsonObject = responseASJsonObject.isPresent() ? responseASJsonObject.get() : null; 
+    	}
+    	if(responseJsonObject == null) {
+    		return null;
+		}
+    	if(!responseJsonObject.has(key) || !(responseJsonObject.get(key) instanceof JSONObject)) {
+    		return null;
+    	}
+    	
+    	JSONObject data = responseJsonObject.getJSONObject(key);
+    	ObjectMapper objectMapper = new ObjectMapper();
+		objectMapper.registerModule(new JavaTimeModule());
+		objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+		objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+		
+		try {
+			return  objectMapper.readValue(data.toString(), clazz);
+		} catch (Exception e) { 
+			log.error(Constant.ERROR_LEVEL, e);
+		}
+		
+    	return null; 
+    }  
+    
+    public <T> List<T> toDtos(Class<T> clazz) {
+    	
+    	JSONArray responseJsonObject = null;
+    	if(contentType.isJSONType() && isJSONArray()) {
+    		Optional<JSONArray> responseASJsonObject = responseAsJSONArray();
+    		responseJsonObject = responseASJsonObject.isPresent() ? responseASJsonObject.get() : null; 
+    	}
+    	if(responseJsonObject == null) {
+    		return Collections.emptyList();
+		}
+    	
+    	ObjectMapper objectMapper = new ObjectMapper();
+		objectMapper.registerModule(new JavaTimeModule());
+		objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+		objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+		
+		try {
+			CollectionType listType = objectMapper.getTypeFactory().constructCollectionType(ArrayList.class, clazz);
+			return  objectMapper.readValue(responseJsonObject.toString(), listType);
+		} catch (Exception e) { 
+			log.error(Constant.ERROR_LEVEL, e);
+		}
+		
+    	return Collections.emptyList(); 
+    }
+    
+    public <T> T toDto(Class<T> clazz) {
+    	
+    	JSONObject responseJsonObject = null;
+    	if(contentType.isJSONType() && isJSONObject()) {
+    		Optional<JSONObject> responseASJsonObject = responseAsJSONObject();
+    		responseJsonObject = responseASJsonObject.isPresent() ? responseASJsonObject.get() : null; 
+    	}
+    	if(responseJsonObject == null) {
+    		return null;
+		}
+    	ObjectMapper objectMapper = new ObjectMapper();
+		objectMapper.registerModule(new JavaTimeModule());
+		objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+		objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+		
+		try {
+			return  objectMapper.readValue(responseJsonObject.toString(), clazz);
+		} catch (Exception e) { 
+			log.error(Constant.ERROR_LEVEL, e);
+		}
+		
+    	return null; 
+    }  
     
 
 }

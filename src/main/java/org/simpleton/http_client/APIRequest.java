@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import org.apache.http.HttpStatus;
 import org.apache.http.client.config.RequestConfig;
@@ -22,6 +23,9 @@ import org.apache.http.client.methods.HttpPut;
 import org.apache.http.client.methods.HttpTrace;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.json.JSONPropertyName;
 import org.simpleton.http_client.util.HttpHeaderBuilderHelper;
 import org.simpleton.http_client.util.HttpRequestProcessor;
 import org.simpleton.http_client.util.JSONUtil;
@@ -29,6 +33,16 @@ import org.simpleton.http_client.util.RequestBodyValidator;
 import org.simpleton.http_client.util.RequestDataBuilder;
 import org.simpleton.http_client.util.URIBuildHelper;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
@@ -490,9 +504,39 @@ public class APIRequest implements Request {
 	  			System.out.println("ResponseHeader: "+apiResponse.getResponseHeader());
 	  			System.out.println("responseAsString: "+apiResponse.responseAsString());
 	  			System.out.println("ResponseCharsets: "+apiResponse.getResponseCharsets());
+	  			System.out.println("ResponseData: "+apiResponse.toDtos("data", Student.class));
 	  		} catch (Exception e) {
+	  			e.printStackTrace();
 	  			log.error("Error ",e); 
 	  		}
 	    	
+	}
+	
+	/**
+	 * {"id":8,"email":"lindsay.ferguson@reqres.in","first_name":"Lindsay","last_name":"Ferguson","avatar":"https://reqres.in/img/faces/8-image.jpg"}
+	 * @author tariqul
+	 *
+	 */
+	@ToString
+	@Getter
+	@Setter
+	@Builder
+	@AllArgsConstructor
+	@NoArgsConstructor
+	public static class Student{
+		
+		private int id;
+		
+		private String email;
+		
+		@JsonProperty("first_name")
+		private String firstName;
+		
+		@JsonProperty("last_name")
+		private String lastName;
+		
+		@JsonProperty("avatar")
+		private String avatar;
+		
 	}
 }

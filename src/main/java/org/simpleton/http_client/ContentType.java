@@ -31,8 +31,19 @@ public enum ContentType {
 	}
 
 	public boolean isTextType() {
-		return this == ContentType.TEXT_HTML || this == ContentType.TEXT_PLAIN || this == ContentType.APPLICATION_XML
-				|| this == ContentType.APPLICATION_JSON;
+		return this == ContentType.TEXT_PLAIN;
+	}
+	
+	public boolean isJSONType() {
+		return this == ContentType.APPLICATION_JSON;
+	}
+	
+	public boolean isHtmlType() {
+		return this == ContentType.TEXT_HTML;
+	}
+	
+	public boolean isXMLType() {
+		return this == ContentType.APPLICATION_XML;
 	}
 
 	public static ContentType valueOfIgnoreCase(String value) {
