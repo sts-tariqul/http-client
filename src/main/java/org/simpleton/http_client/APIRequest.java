@@ -5,33 +5,29 @@
  */
 package org.simpleton.http_client;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Timer;
-import java.util.TimerTask;
 
-import org.apache.http.Header;
-import org.apache.http.NameValuePair;
+import org.apache.http.HttpStatus;
 import org.apache.http.client.config.RequestConfig;
-import org.apache.http.client.entity.UrlEncodedFormEntity;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpDelete;
-import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpEntityEnclosingRequestBase;
+import org.apache.http.client.methods.HttpHead;
+import org.apache.http.client.methods.HttpOptions;
 import org.apache.http.client.methods.HttpPatch;
 import org.apache.http.client.methods.HttpPost;
-import org.apache.http.client.utils.URIBuilder;
-import org.apache.http.entity.StringEntity;
+import org.apache.http.client.methods.HttpPut;
+import org.apache.http.client.methods.HttpTrace;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
-import org.apache.http.message.BasicNameValuePair;
-import org.json.JSONObject;
+import org.simpleton.http_client.util.HttpHeaderBuilderHelper;
+import org.simpleton.http_client.util.HttpRequestProcessor;
+import org.simpleton.http_client.util.JSONUtil;
+import org.simpleton.http_client.util.RequestBodyValidator;
+import org.simpleton.http_client.util.RequestDataBuilder;
+import org.simpleton.http_client.util.URIBuildHelper;
 
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
@@ -43,24 +39,55 @@ import lombok.extern.slf4j.Slf4j;
  */
 @ToString
 @Slf4j
-public class APIRequest {
+public class APIRequest implements Request {
+	
+	private static final String MISMATCH_MEDIA_TYPE = "Media Type Not Matched";
+	
+	private URIBuildHelper uriBuildHelper;
+	
+	private HttpHeaderBuilderHelper headerBuilderHelper; 
+	
+	private HttpRequestProcessor httpRequestProcessor;
+	
+	private RequestBodyValidator requestBodyValidator;
+	
+	private RequestDataBuilder requestDataBuilder;
 
 	private String url;
-	private Optional<URIBuilder> uri;
+	
+	private URI uri;
+	
 	private Map<String, String> headers;
-	private Map<String, String> queryParams;
-	private Map<String, String> formParams;
+	
 	private List<String> pathParams;
-	private HttpClientConfig httpClientConfig;
+	
+	private Map<String, String> queryParams;
+	
+	private Map<String, String> formParams;
+	
+	private ContentType contentType;
+	
+	private List<Attachment> attachments;
+	
+	private String reqeustBody;
+	
+	private String errorMessage;
+	
+	private JSONUtil jsonUtil;
 
     public APIRequest(final String url) {
     	this.url = url;
-    	this.uri = Optional.empty();
+    	this.attachments = new ArrayList<>();
     	this.queryParams = new HashMap<>();
     	this.formParams = new HashMap<>();
     	this.headers = new HashMap<>(); 
     	this.pathParams = new ArrayList<>();
-    	this.httpClientConfig = HttpClientConfig.builder().build();
+    	this.uriBuildHelper = new URIBuildHelper();
+    	this.headerBuilderHelper = new HttpHeaderBuilderHelper();
+    	this.httpRequestProcessor = new HttpRequestProcessor();
+    	this.requestBodyValidator = new RequestBodyValidator();
+    	this.requestDataBuilder = new RequestDataBuilder();
+    	this.jsonUtil = new JSONUtil();
     }
     
     public static APIRequest of(final String url) {
@@ -78,14 +105,31 @@ public class APIRequest {
     	}
         return this;
     }
+    
+    public APIRequest pathParam(List<String> pathParamArray) {
+    	for(String pathParam:pathParamArray) {
+    		  this.pathParams.add(pathParam);
+    	}
+        return this;
+    }
 
     public APIRequest queryParam(String key, String value) {
         this.queryParams.put(key, value);
         return this;
     }
     
+    public APIRequest queryParam(Map<String,String> queryParams) {
+        this.queryParams.putAll(queryParams); 
+        return this;
+    }
+    
     public APIRequest formParam(String key, String value) {
         this.formParams.put(key, value);
+        return this;
+    }
+    
+    public APIRequest formParam(Map<String,String> formParams) {
+        this.formParams.putAll(formParams); 
         return this;
     }
 
@@ -94,12 +138,33 @@ public class APIRequest {
         return this;
     }
     
-    private void baseURIBuilder() { 
-    	try {
-    		 this.uri = Optional.ofNullable(new URIBuilder(this.url));
-		} catch (Exception e) {
-			log.error("BaseURIBuilder Error ", e); 
-		}
+    public APIRequest header(Map<String,String> headers) {
+        this.headers.putAll(headers); 
+        return this;
+    }
+    
+    public APIRequest contentType(ContentType contentType) {
+        this.contentType = contentType;
+        return this;
+    }
+    
+    public APIRequest attachments(Attachment... attachments) {
+    	for(Attachment attachment : attachments) {
+  		  this.attachments.add(attachment);
+    	}
+        return this;
+    }
+    
+    public APIRequest attachments(List<Attachment> attachments) { 
+    	for(Attachment attachment : attachments) {
+  		  this.attachments.add(attachment);
+    	}
+        return this;
+    }
+    
+    public APIRequest attachments(Attachment attachment) {
+  		this.attachments.add(attachment);
+        return this;
     }
     
     /**
@@ -107,457 +172,327 @@ public class APIRequest {
      * @return <code>CloseableHttpClient</code> instance
      */
     private CloseableHttpClient initClient() {
+    	HttpClientConfig httpClientConfig = HttpClientConfig.builder().build();
     	RequestConfig config = RequestConfig.custom()
-    			  .setConnectTimeout(httpClientConfig.getConnectTimeout() * 1000)
-    			  .setConnectionRequestTimeout(httpClientConfig.getConnectionRequestTimeout() * 1000)
-    			  .setSocketTimeout(httpClientConfig.getSocketTimeout() * 1000).build();
+    			  .setConnectTimeout(httpClientConfig.getConnectTimeout() * Constant.ONE_SECOND_MILLISECOND)
+    			  .setConnectionRequestTimeout(httpClientConfig.getConnectionRequestTimeout() * Constant.ONE_SECOND_MILLISECOND)
+    			  .setSocketTimeout(httpClientConfig.getSocketTimeout() * Constant.ONE_SECOND_MILLISECOND).build();
 		return HttpClientBuilder.create().setDefaultRequestConfig(config).build(); 
     }
     
-    private void appendPathParams() {
-    	this.uri.get().setPathSegments(pathParams);
-    }
-    
-    private void appendQueryParams() {
-    	 for (Map.Entry<String, String> entry : this.queryParams.entrySet()) { 
-         	this.uri.get().addParameter(entry.getKey(), entry.getValue());
-         }
-    }
-    
-    private HttpGet appendHeaderToHttpGet(HttpGet get) { 
-    	 for (Map.Entry<String, String> entry : this.headers.entrySet()) {
-             get.addHeader(entry.getKey(), entry.getValue());
-         }
-    	 return get;
-    }
-    
-    private HttpPost appendHeaderToHttpPost(HttpPost post) { 
-   	 	for (Map.Entry<String, String> entry : this.headers.entrySet()) {
-   	 		post.addHeader(entry.getKey(), entry.getValue());
+	@Override
+	public APIResponse get() {
+		
+		uri = uriBuildHelper.buildURI(url, pathParams, queryParams);
+		
+		if(uri == null) {
+         	return new APIResponse(new StringBuilder(uriBuildHelper.getErrorMessage())); 
         }
-   	 	return post;
-    }
-    
-    private HttpDelete appendHeaderToHttpDelete(HttpDelete delete) { 
-   	 	for (Map.Entry<String, String> entry : this.headers.entrySet()) {
-   	 		delete.addHeader(entry.getKey(), entry.getValue());
-        }
-   	 	return delete;
-    }
-
-    public APIResponse get(){
-
-        baseURIBuilder(); 
+		
+        boolean valid = requestBodyValidator.isValidRequestBody(contentType, reqeustBody, formParams, attachments);
         
-        if(!this.uri.isPresent()) {
-        	return new APIResponse(new StringBuilder("Invalid Base Url."));
-        }
-         
-        appendPathParams();
- 
-        appendQueryParams();
-        
-        HttpGet get = new HttpGet(this.uri.get().toString());
-        
-        get = appendHeaderToHttpGet(get);
-
         APIResponse response = new APIResponse();
-
+        
+        if(!valid) {
+        	response.status(Status.of(HttpStatus.SC_BAD_REQUEST, MISMATCH_MEDIA_TYPE));
+        	response.contentType(ContentType.TEXT_PLAIN.name()); 
+        	response.response(new StringBuilder().append(requestBodyValidator.getErrorMessage()).append(":").append(MISMATCH_MEDIA_TYPE));
+        	return response;
+        }
+        
+        // Create a HttpGetWithEntity request
+        HttpGetWithEntity httpGetWithEntity = new HttpGetWithEntity(this.uri.toString());
+        
+        headerBuilderHelper.appendHeader(httpGetWithEntity, headers); 
+        
+        requestDataBuilder.buildRequestData(httpGetWithEntity, contentType, formParams, reqeustBody, attachments); 
+        
         try(CloseableHttpClient client = initClient();) {
-            response = processGetRequest(client, get);
+            response = httpRequestProcessor.processRequest(client, httpGetWithEntity);
         } catch (Exception e) {
         	response.response(new StringBuilder(e.getMessage())); 
-        	log.error("ProcessGetRequest Error ", e); 
+        	log.error(Constant.ERROR_LEVEL, e); 
 		}
 
         return response;
-    }
+        
+	}
 
-    public APIResponse postURL() {
-
-    	baseURIBuilder(); 
-    	
-    	if(!this.uri.isPresent()) {
-         	return new APIResponse(new StringBuilder("Invalid Base Url."));
+	@Override
+	public APIResponse post() {
+		
+		uri = uriBuildHelper.buildURI(url, pathParams, queryParams);
+		
+		if(uri == null) {
+         	return new APIResponse(new StringBuilder(uriBuildHelper.getErrorMessage())); 
         }
-    	 
-    	appendPathParams();
-    	 
-        appendQueryParams();
+		
+        boolean valid = requestBodyValidator.isValidRequestBody(contentType, reqeustBody, formParams, attachments);
+        
+        APIResponse response = new APIResponse();
+        
+        if(!valid) {
+        	response.status(Status.of(HttpStatus.SC_BAD_REQUEST, MISMATCH_MEDIA_TYPE));
+        	response.contentType(ContentType.TEXT_PLAIN.name()); 
+        	response.response(new StringBuilder().append(requestBodyValidator.getErrorMessage()).append(":").append(MISMATCH_MEDIA_TYPE));
+        	return response;
+         }
+        
+        
+        // Create a HttpPost request
+        HttpPost httpPost = new HttpPost(this.uri.toString());
+        
+        headerBuilderHelper.appendHeader(httpPost, headers); 
+        
+        requestDataBuilder.buildRequestData(httpPost, contentType, formParams, reqeustBody, attachments); 
+        
+        try(CloseableHttpClient client = initClient();) {
+            response = httpRequestProcessor.processRequest(client, httpPost);
+        } catch (Exception e) {
+        	response.response(new StringBuilder(e.getMessage())); 
+        	log.error(Constant.ERROR_LEVEL, e); 
+		}
 
-        HttpPost post = new HttpPost(this.uri.get().toString());
+        return response;
+        
+	}
 
-        post = appendHeaderToHttpPost(post);
+	@Override
+	public APIResponse put() {
+		
+		uri = uriBuildHelper.buildURI(url, pathParams, queryParams);
+		
+		if(uri == null) {
+         	return new APIResponse(new StringBuilder(uriBuildHelper.getErrorMessage())); 
+        }
+		
+        boolean valid = requestBodyValidator.isValidRequestBody(contentType, reqeustBody, formParams, attachments);
+        
+        APIResponse response = new APIResponse();
+        
+        if(!valid) {
+        	response.status(Status.of(HttpStatus.SC_BAD_REQUEST, MISMATCH_MEDIA_TYPE));
+        	response.contentType(ContentType.TEXT_PLAIN.name()); 
+        	response.response(new StringBuilder().append(requestBodyValidator.getErrorMessage()).append(":").append(MISMATCH_MEDIA_TYPE));
+        	return response;
+        }
+        
+        // Create a HttpPut request
+        HttpPut httpPut = new HttpPut(this.uri.toString());
+        
+        headerBuilderHelper.appendHeader(httpPut, headers); 
+        
+        requestDataBuilder.buildRequestData(httpPut, contentType, formParams, reqeustBody, attachments); 
+        
+        try(CloseableHttpClient client = initClient();) {
+            response = httpRequestProcessor.processRequest(client, httpPut);
+        } catch (Exception e) {
+        	response.response(new StringBuilder(e.getMessage())); 
+        	log.error(Constant.ERROR_LEVEL, e); 
+		}
 
+        return response;
+        
+	}
+
+	@Override
+	public APIResponse delete() {
+		
+		uri = uriBuildHelper.buildURI(url, pathParams, queryParams);
+		
+		if(uri == null) {
+         	return new APIResponse(new StringBuilder(uriBuildHelper.getErrorMessage())); 
+        }
+		
+		boolean valid = requestBodyValidator.isValidRequestBody(contentType, reqeustBody, formParams, attachments);
+        
+        APIResponse response = new APIResponse();
+        
+        if(!valid) {
+        	response.status(Status.of(HttpStatus.SC_BAD_REQUEST, MISMATCH_MEDIA_TYPE));
+        	response.contentType(ContentType.TEXT_PLAIN.name()); 
+        	response.response(new StringBuilder().append(requestBodyValidator.getErrorMessage()).append(":").append(MISMATCH_MEDIA_TYPE));
+        	return response;
+         }
+		
+        // Create a HttpDeleteWithEntity request
+		HttpDeleteWithEntity httpDeleteWithEntity = new HttpDeleteWithEntity(this.uri.toString());
+        
+        headerBuilderHelper.appendHeader(httpDeleteWithEntity, headers); 
+        
+        requestDataBuilder.buildRequestData(httpDeleteWithEntity, contentType, formParams, reqeustBody, attachments); 
+        
+        try(CloseableHttpClient client = initClient();) {
+            response = httpRequestProcessor.processRequest(client, httpDeleteWithEntity);
+        } catch (Exception e) {
+        	response.response(new StringBuilder(e.getMessage())); 
+        	log.error(Constant.ERROR_LEVEL, e); 
+		}
+
+        return response;
+	}
+
+	@Override
+	public APIResponse head() {
+		
+		uri = uriBuildHelper.buildURI(url, pathParams, queryParams);
+		
+		if(uri == null) {
+         	return new APIResponse(new StringBuilder(uriBuildHelper.getErrorMessage())); 
+        }
+		
+		APIResponse response = new APIResponse();
+		
+		// Create an HttpHead request
+        HttpHead httpHead = new HttpHead(this.uri.toString());
+        
+        headerBuilderHelper.appendHeader(httpHead, headers); 
+        
+        try(CloseableHttpClient client = initClient();) {
+            response = httpRequestProcessor.processRequest(client, httpHead);
+        } catch (Exception e) {
+        	response.response(new StringBuilder(e.getMessage())); 
+        	log.error(Constant.ERROR_LEVEL, e); 
+		}
+
+        return response;
+	}
+
+	@Override
+	public APIResponse patch() {
+		
+		uri = uriBuildHelper.buildURI(url, pathParams, queryParams);
+		
+		if(uri == null) {
+         	return new APIResponse(new StringBuilder(uriBuildHelper.getErrorMessage())); 
+        }
+		
+        boolean valid = requestBodyValidator.isValidRequestBody(contentType, reqeustBody, formParams, attachments);
+        
+        APIResponse response = new APIResponse();
+        
+        if(!valid) {
+        	response.status(Status.of(HttpStatus.SC_BAD_REQUEST, MISMATCH_MEDIA_TYPE));
+        	response.contentType(ContentType.TEXT_PLAIN.name()); 
+        	response.response(new StringBuilder().append(requestBodyValidator.getErrorMessage()).append(":").append(MISMATCH_MEDIA_TYPE));
+        	return response;
+         }
+        
+        
+        // Create a HttpPatch request
+        HttpPatch httpPatch = new HttpPatch(this.uri.toString());
+        
+        headerBuilderHelper.appendHeader(httpPatch, headers); 
+        
+        requestDataBuilder.buildRequestData(httpPatch, contentType, formParams, reqeustBody, attachments); 
+        
+        try(CloseableHttpClient client = initClient();) {
+            response = httpRequestProcessor.processRequest(client, httpPatch);
+        } catch (Exception e) {
+        	response.response(new StringBuilder(e.getMessage())); 
+        	log.error(Constant.ERROR_LEVEL, e); 
+		}
+
+        return response;
+        
+	}
+	
+
+
+	@Override
+	public APIResponse options() {
+		
+		uri = uriBuildHelper.buildURI(url, pathParams, queryParams);
+		
+		if(uri == null) {
+         	return new APIResponse(new StringBuilder(uriBuildHelper.getErrorMessage())); 
+        }
+        
+        // Create an HTTP OPTIONS request
+        HttpOptions httpOptions = new HttpOptions(this.uri.toString()); 
+        
+        headerBuilderHelper.appendHeader(httpOptions, headers); 
+        
         APIResponse response = new APIResponse();
 
         try(CloseableHttpClient client = initClient();) {
-            response = processPostRequest(client, post);
+            response = httpRequestProcessor.processRequest(client, httpOptions);
         } catch (Exception e) {
         	response.response(new StringBuilder(e.getMessage())); 
         	log.error("ProcessPostRequest Error ", e); 
 		}
 
         return response;
-    }
-
-    public APIResponse postForm() {
-    	
-    	baseURIBuilder(); 
-    	
-    	if(!this.uri.isPresent()) {
-         	return new APIResponse(new StringBuilder("Invalid Base Url."));
+	}
+	
+	@Override
+	public APIResponse trace() {
+		
+		uri = uriBuildHelper.buildURI(url, pathParams, queryParams);
+		
+		if(uri == null) {
+         	return new APIResponse(new StringBuilder(uriBuildHelper.getErrorMessage())); 
         }
-    	
-    	appendPathParams();
-   	 
-        appendQueryParams();
-
-        HttpPost post = new HttpPost(this.uri.get().toString());
+    	 
+        // Create a TRACE request
+        HttpTrace traceRequest = new HttpTrace(this.uri.toString());
         
-        List<NameValuePair> formParameters = new ArrayList<>();
-
-        for (Map.Entry<String, String> entry : this.formParams.entrySet()) {
-        	formParameters.add(new BasicNameValuePair(entry.getKey(), entry.getValue()));
-        }
-
-        post = appendHeaderToHttpPost(post);
-
-        post.setEntity(new UrlEncodedFormEntity(formParameters, StandardCharsets.UTF_8));
-
+        headerBuilderHelper.appendHeader(traceRequest, headers); 
+        
         APIResponse response = new APIResponse();
 
         try(CloseableHttpClient client = initClient();) {
-            response = this.processPostRequest(client, post);
+            response = httpRequestProcessor.processRequest(client, traceRequest);
         } catch (Exception e) {
         	response.response(new StringBuilder(e.getMessage())); 
         	log.error("ProcessPostRequest Error ", e); 
 		}
 
         return response;
-    }
-   
-    
-    public APIResponse delete() {
-    	
-    	baseURIBuilder(); 
-    	
-    	if(!this.uri.isPresent()) {
-         	return new APIResponse(new StringBuilder("Invalid Base Url."));
-        }
-    	
-    	appendPathParams();
-      	 
-        appendQueryParams();
-
-        HttpDelete delete = new HttpDelete(uri.get().toString()); 
-
-        delete = appendHeaderToHttpDelete(delete);
-
-        APIResponse response = new APIResponse();
-
-        try(CloseableHttpClient client = initClient();) {
-            response = this.processDeleteRequest(client, delete);
-        } catch (Exception e) {
-        	response.response(new StringBuilder(e.getMessage())); 
-        	log.error("ProcessDeleteRequest Error ", e); 
+	}
+	
+	static class HttpGetWithEntity extends HttpEntityEnclosingRequestBase {
+		public HttpGetWithEntity(String uri) {
+			setURI(URI.create(uri));
 		}
 
-        return response;
-    }
-    
-    public APIResponse patch() throws Exception {
-    	
-    	baseURIBuilder(); 
-    	
-    	if(!this.uri.isPresent()) {
-         	return new APIResponse(new StringBuilder("Invalid Base Url."));
-        }
-    	
-    	appendPathParams();
-     	 
-        appendQueryParams();
-
-        HttpPatch patch = new HttpPatch(this.uri.get().toString());
-
-        List<NameValuePair> formParameters = new ArrayList<>();
-
-        for (Map.Entry<String, String> entry : this.formParams.entrySet()) {
-        	formParameters.add(new BasicNameValuePair(entry.getKey(), entry.getValue()));
-        }
-
-        for (Map.Entry<String, String> entry : this.headers.entrySet()) {
-            patch.addHeader(entry.getKey(), entry.getValue()); 
-        }
-
-        patch.setEntity(new UrlEncodedFormEntity(formParameters, StandardCharsets.UTF_8));
-
-        APIResponse response = new APIResponse();
-
-        try(CloseableHttpClient client = initClient();) {
-            response = this.processPatchRequest(client, patch);
-        } catch (Exception e) {
-        	response.response(new StringBuilder(e.getMessage())); 
-        	log.error("ProcessDeleteRequest Error ", e); 
-        }
-
-        return response;
-    }
-
-    public APIResponse postJSON() throws Exception {
-    	
-    	baseURIBuilder(); 
-    	
-    	if(!this.uri.isPresent()) {
-         	return new APIResponse(new StringBuilder("Invalid Base Url."));
-        }
-    	
-    	appendPathParams();
-    	 
-        appendQueryParams();
-
-        HttpPost post = new HttpPost(this.uri.get().toString());
-
-        JSONObject paramJSON = new JSONObject();
-
-        for (Map.Entry<String, String> entry : formParams.entrySet()) {
-            paramJSON.put(entry.getKey(), entry.getValue());
-        }
-
-        post = appendHeaderToHttpPost(post);
-
-        post.setEntity(new StringEntity(paramJSON.toString(), "utf-8"));
-
-        CloseableHttpClient client = initClient();
-        
-        APIResponse response = null;
-
-        try {
-            response = this.processPostRequest(client, post);
-        } finally {
-
-            if (client != null) {
-                client.close();
-            }
-            client = null;
-        }
-
-        return response;
-    }
-    
-    public APIResponse postBody(String requestBody) throws Exception {
-    	
-    	baseURIBuilder(); 
-    	
-    	if(!this.uri.isPresent()) {
-         	return new APIResponse(new StringBuilder("Invalid Base Url."));
-        }
-    	
-    	appendPathParams();
-    	 
-        appendQueryParams();
-
-        HttpPost post = new HttpPost(this.uri.get().toString());
-
-        post = appendHeaderToHttpPost(post);
-        
-        post.setEntity(new StringEntity(requestBody, "utf-8"));
-
-        CloseableHttpClient client = initClient();
-        
-        APIResponse response = null;
-
-        try {
-            response = this.processPostRequest(client, post);
-        } finally {
-
-            if (client != null) {
-                client.close();
-            }
-            client = null;
-            
-        }
-
-        return response;
-    }
-
-    private APIResponse processPatchRequest(CloseableHttpClient client, HttpPatch patch) throws IOException {
-    	
-    	Timer timer = new Timer(true);
-    	TimerTask task = new TimerTask() {
-    	    @Override
-    	    public void run() {
-    	        if (patch != null) {
-    	        	patch.abort();
-    	        } 
-    	        timer.cancel();
-    	    }
-    	};
-    	timer.schedule(task, httpClientConfig.getHardTimeout() * 1000);
-
-        CloseableHttpResponse response = client.execute(patch);
-        
-        APIResponse apiResponse = null;
-
-        try {
-
-            apiResponse = processResponse(response);
-
-        } finally {
-            if (response != null) {
-                response.close();
-            }
-        }
-
-        return apiResponse;
-    }
-    
-    private APIResponse processDeleteRequest(CloseableHttpClient client, HttpDelete delete) throws IOException {
-
-    	Timer timer = new Timer(true);
-    	TimerTask task = new TimerTask() {
-    	    @Override
-    	    public void run() {
-    	        if (delete != null) {
-    	        	delete.abort();
-    	        } 
-    	        timer.cancel();
-    	    }
-    	};
-    	timer.schedule(task, httpClientConfig.getHardTimeout() * 1000);
-    	
-        CloseableHttpResponse response = client.execute(delete);
-        
-        APIResponse apiResponse = null;
-
-        try {
-
-            apiResponse = processResponse(response);
-
-        } finally {
-            if (response != null) {
-                response.close();
-            }
-        }
-
-        return apiResponse;
-    }
- 
-    
-    private APIResponse processPostRequest(CloseableHttpClient client, HttpPost post) throws IOException {
-
-    	Timer timer = new Timer(true);
-    	
-    	TimerTask task = new TimerTask() {
-    	    @Override
-    	    public void run() {
-    	        if (post != null) {
-    	        	post.abort();
-    	        } 
-    	        timer.cancel();
-    	    }
-    	};
-    	timer.schedule(task, httpClientConfig.getHardTimeout() * 1000);
-        
-        APIResponse apiResponse = null;
-
-        try( CloseableHttpResponse response = client.execute(post);) {
-
-            apiResponse = processResponse(response);
-
-        }catch (Exception e) {
-			log.error("Error :{}", e); 
+		@Override
+		public String getMethod() {
+			return "GET";
+		}
+	}
+	
+	
+	static class HttpDeleteWithEntity extends HttpEntityEnclosingRequestBase {
+		public HttpDeleteWithEntity(String uri) {
+			setURI(URI.create(uri));
 		}
 
-        return apiResponse;
-    }
-
-    private APIResponse processGetRequest(CloseableHttpClient client, HttpGet get){
-
-    	Timer timer = new Timer(true);
-    	
-    	TimerTask task = new TimerTask() {
-    	    @Override
-    	    public void run() {
-    	        if (get != null) {
-    	        	get.abort();
-    	        } 
-    	        timer.cancel();
-    	    }
-    	};
-    	timer.schedule(task, httpClientConfig.getHardTimeout() * 1000);
-    	
-    	APIResponse apiResponse = new APIResponse();
-    	
-    	try (CloseableHttpResponse response = client.execute(get);){
-    		return processResponse(response);
-		} catch (Exception e) { 
-			apiResponse.response(new StringBuilder(e.getMessage()));
-			log.error("ProcessResponse Error" , e); 
+		@Override
+		public String getMethod() {
+			return "DELETE";
 		}
+	}
+	
+	
+	public static void main(String[] args) {
+	    	
+	    	APIRequest apiRequest = new APIRequest("https://reqres.in");
+	    	
+	    	apiRequest.pathParam("api","users");
+	    	apiRequest.queryParam("page", "2");
 
-        return apiResponse;
-    }
-
-    private APIResponse processResponse(CloseableHttpResponse response) {
-
-        APIResponse apiResponse = new APIResponse(new Status(response.getStatusLine().getStatusCode()));
-        
-        BufferedReader bufferedReader = null;
-
-        try {
-
-        	if(null!=response.getEntity() 
-        			&& null!=response.getEntity().getContent()) {
-        		  bufferedReader = new BufferedReader(new InputStreamReader(response.getEntity().getContent()));
-                  StringBuilder stringBuilder = new StringBuilder();
-                  String line = null;
-
-                  while ((line = bufferedReader.readLine()) != null) {
-                      stringBuilder.append(line);
-                  }
-
-                  apiResponse.response(stringBuilder);
-        	}
-            
-            for (Header header: response.getAllHeaders()) {
-            	apiResponse.responseHeader(header.getName(), header.getValue());
-            }
-
-        } catch (UnsupportedOperationException e) { 
-        	apiResponse.response(new StringBuilder(e.getMessage()));
-        	log.error("ProcessResponse UnsupportedOperationException Error " , e ); 
-		} catch (IOException e) {
-			apiResponse.response(new StringBuilder(e.getMessage()));
-			log.error("ProcessResponse IOException Error " , e ); 
-		} finally {
-            if (bufferedReader != null) {
-                try {
-					bufferedReader.close();
-				} catch (IOException e) {
-					apiResponse.response(new StringBuilder(e.getMessage()));
-					log.error("ProcessResponse IOException Error " , e ); 
-				}
-            }
-        }
-
-        return apiResponse;
-    }
-    
-    public static void main(String[] args) {
-    	
-    	APIRequest apiRequest = new APIRequest("https://reqres.in");
-    	
-    	apiRequest.pathParam("api","users");
-    	apiRequest.queryParam("page", "2");
-
-    	try {
-    		System.out.println("Start Process"); 
-  			APIResponse apiResponse = apiRequest.get();
-  			System.out.println("StatusCode: "+apiResponse.getStatus());
-  		} catch (Exception e) {
-  			log.error("Error ",e); 
-  		}
-    	
-    }
+	    	try {
+	    		System.out.println("Start Process"); 
+	  			APIResponse apiResponse = apiRequest.get();
+	  			System.out.println("StatusCode: "+apiResponse.getStatus());
+	  			System.out.println("ContentType: "+apiResponse.getContentType());
+	  			System.out.println("ResponseHeader: "+apiResponse.getResponseHeader());
+	  			System.out.println("responseAsString: "+apiResponse.responseAsString());
+	  			System.out.println("ResponseCharsets: "+apiResponse.getResponseCharsets());
+	  		} catch (Exception e) {
+	  			log.error("Error ",e); 
+	  		}
+	    	
+	}
 }

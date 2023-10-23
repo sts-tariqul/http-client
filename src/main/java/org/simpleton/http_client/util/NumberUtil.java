@@ -1,7 +1,7 @@
 /**
  * 
  */
-package org.simpleton.http_client;
+package org.simpleton.http_client.util;
 
 /**
  * @author tariqul

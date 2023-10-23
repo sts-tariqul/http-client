@@ -3,8 +3,7 @@
  */
 package org.simpleton.http_client;
 
-import java.util.Timer;
-import java.util.TimerTask;
+import org.simpleton.http_client.util.EnviornmentUtil;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -23,7 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 @NoArgsConstructor
 @AllArgsConstructor
 @ToString
-class HttpClientConfig {
+public class HttpClientConfig {
 
 	@Setter
 	private Integer connectTimeout;

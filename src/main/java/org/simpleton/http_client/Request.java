@@ -3,8 +3,6 @@
  */
 package org.simpleton.http_client;
 
-import org.json.JSONObject;
-
 /**
  * 
  * @author <a href="https://www.linkedin.com/in/tariqulislam">Tariqul Islam</a>
@@ -38,16 +36,16 @@ interface Request {
 	
 	public APIResponse post();
 	
-	public APIResponse postForm();
+	public APIResponse put();
 	
-	public APIResponse postJSON();
+	public APIResponse delete();
 	
-	public APIResponse post(JSONObject requestBody);
-	
-	public APIResponse post(String requestBody);
+	public APIResponse head();
 	
 	public APIResponse patch();
 	
-	public APIResponse delete();
+	public APIResponse options();
+	
+	public APIResponse trace();
 
 }

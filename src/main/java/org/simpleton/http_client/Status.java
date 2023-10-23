@@ -27,5 +27,14 @@ public class Status {
 	public Status(int code) {
 		this.code = code;
 	}
+	
+	public boolean isSuccess() {
+		return getCode() >= 200 
+				&& getCode() < 300; 
+	}
+	
+	public static Status of(final int code, final String statusMessage) {
+		return new Status(code, statusMessage);
+	}
 
 }
