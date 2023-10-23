@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import org.apache.http.HttpStatus;
 import org.apache.http.client.config.RequestConfig;
@@ -23,9 +22,6 @@ import org.apache.http.client.methods.HttpPut;
 import org.apache.http.client.methods.HttpTrace;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
-import org.json.JSONArray;
-import org.json.JSONObject;
-import org.json.JSONPropertyName;
 import org.simpleton.http_client.util.HttpHeaderBuilderHelper;
 import org.simpleton.http_client.util.HttpRequestProcessor;
 import org.simpleton.http_client.util.JSONUtil;
@@ -34,9 +30,6 @@ import org.simpleton.http_client.util.RequestDataBuilder;
 import org.simpleton.http_client.util.URIBuildHelper;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
