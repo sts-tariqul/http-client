@@ -16,11 +16,14 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * @author tariqul
- *
+ * 
+ * @author tariqul <a href="https://www.linkedin.com/in/tariqulislam">Tariqul Islam</a>
+ * <br>
+ * Email: <a href="mailto:sumon.screenfusion@gmail.com">sumon.screenfusion@gmail.com</a>
+ * <br>
+ * @since Oct 26, 2023 :: 1:32:24 AM
  */
 @Slf4j
-
 public class URIBuildHelper {
 
 	@Getter

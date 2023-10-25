@@ -1,18 +1,18 @@
-/**
- * @author Mar 10, 2023 10:39:10 PM 
- * 
- */
 package org.simpleton.http_client;
 
 import lombok.Getter;
-import lombok.ToString;
+import lombok.Setter;
 
 /**
- * @author tariqul :: Mar 10, 2023 :: 10:39:10 PM 
- *
+ * 
+ * @author tariqul <a href="https://www.linkedin.com/in/tariqulislam">Tariqul Islam</a>
+ * <br>
+ * Email: <a href="mailto:sumon.screenfusion@gmail.com">sumon.screenfusion@gmail.com</a>
+ * <br>
+ * @since Oct 26, 2023 :: 1:30:23 AM
  */
-@ToString
 @Getter
+@Setter
 public class Status {
 	
 	private int code;

@@ -5,6 +5,7 @@
  */
 package org.simpleton.http_client;
 
+import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -19,14 +20,11 @@ import java.util.regex.Pattern;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.simpleton.http_client.util.JSONUtil;
+import org.simpleton.http_client.util.JacksonObjectMapperConfig;
 import org.simpleton.http_client.util.StringUtil;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.type.CollectionType;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import lombok.Getter;
 import lombok.ToString;
@@ -34,8 +32,12 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * 
- * @author tariqul :: Mar 9, 2023 :: 2:24:08 AM 
- *
+ * @author tariqul <a href="https://www.linkedin.com/in/tariqulislam">Tariqul Islam</a>
+ * <br>
+ * Email: <a href="mailto:sumon.screenfusion@gmail.com">sumon.screenfusion@gmail.com</a>
+ * <br>
+ * @since Oct 26, 2023 :: 1:32:46 AM
+ * 
  */
 @ToString
 @Slf4j
@@ -55,6 +57,8 @@ public class APIResponse {
     
     private JSONUtil jsonUtil;
     
+    private JacksonObjectMapperConfig mapperConfig;
+    
     @Getter
     private String contentTypeInString;
     
@@ -67,6 +71,7 @@ public class APIResponse {
     	this.response = new StringBuilder();
     	this.responseHeader = new HashMap<>();
     	this.jsonUtil = new JSONUtil();
+    	this.mapperConfig = new JacksonObjectMapperConfig();
     }
 
     public APIResponse(Status status, StringBuilder response) {
@@ -74,18 +79,21 @@ public class APIResponse {
         this.status = status; 
         this.response = response;
         this.jsonUtil = new JSONUtil();
+        this.mapperConfig = new JacksonObjectMapperConfig();
     }
     
     public APIResponse(StringBuilder response) { 
     	this.responseHeader = new HashMap<>();
     	this.response = response;
     	this.jsonUtil = new JSONUtil();
+    	this.mapperConfig = new JacksonObjectMapperConfig();
 	}
 
 	public APIResponse(Status status) { 
 		this.responseHeader = new HashMap<>();
 		this.status = status;
 		this.jsonUtil = new JSONUtil();
+		this.mapperConfig = new JacksonObjectMapperConfig();
 	}
 
 	public APIResponse responseHeader(String key, String value) {
@@ -198,121 +206,163 @@ public class APIResponse {
     	log.info("responseHeader :: {} ", responseHeader); 
     }
     
+    /**
+     * Deserialize a JSON array at a specified key from the HTTP response into a list of Java objects of the given class.
+     * @author <a href="https://www.linkedin.com/in/tariqulislam">Tariqul Islam</a>
+     * <br>
+     * Email: <a href="mailto:sumon.screenfusion@gmail.com">sumon.screenfusion@gmail.com</a>
+     * <br>
+     * @since : Apr 30, 2023 12:39:22 AM
+     * @param key   The key that represents the JSON array to be deserialized.
+     * @param clazz The class of the Java objects in the list.
+     * @return A list of deserialized Java objects, or an empty list if deserialization fails or the key is not found.
+     */
     public <T> List<T> toDtos(String key, Class<T> clazz) {
-    	if(StringUtil.isBlank(key)) {
+    	
+        // Check if the key is empty or if the response is not in JSON format or not a JSON object.
+		if (StringUtil.isBlank(key) || !contentType.isJSONType() || !isJSONObject()) {
+			return Collections.emptyList();
+	    }
+		
+	    // Attempt to retrieve the response as a JSON object.
+		Optional<JSONObject> responseASJsonObject = responseAsJSONObject();
+    			
+    	if(!responseASJsonObject.isPresent()) {
     		return Collections.emptyList();
     	}
-    	JSONObject responseJsonObject = null;
-    	if(contentType.isJSONType() && isJSONObject()) {
-    		Optional<JSONObject> responseASJsonObject = responseAsJSONObject();
-    		responseJsonObject = responseASJsonObject.isPresent() ? responseASJsonObject.get() : null; 
-    	}
-    	if(responseJsonObject == null) {
-    		return Collections.emptyList();
-		}
+    	
+    	JSONObject responseJsonObject = responseASJsonObject.get();
+    	
+        // Check if the key exists in the JSON object and is a JSON array.
     	if(!responseJsonObject.has(key) || !(responseJsonObject.get(key) instanceof JSONArray)) {
     		return Collections.emptyList();
     	}
     	
+        // Deserialize the JSON array at the specified key into a list of Java objects.
     	JSONArray data = responseJsonObject.getJSONArray(key);
-    	ObjectMapper objectMapper = new ObjectMapper();
-		objectMapper.registerModule(new JavaTimeModule());
-		objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-		objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-		objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
 		
 		try {
+			ObjectMapper objectMapper = mapperConfig.getObjectMapper();
 			CollectionType listType = objectMapper.getTypeFactory().constructCollectionType(ArrayList.class, clazz);
 			return  objectMapper.readValue(data.toString(), listType);
-		} catch (Exception e) { 
-			log.error(Constant.ERROR_LEVEL, e);
+		} catch (IOException e) { 
+			log.error("Error deserializing JSONArray response {}", e);
 		}
 		
     	return Collections.emptyList(); 
     }
     
-    public <T> T toDto(String key, Class<T> clazz) {
-    	if(StringUtil.isBlank(key)) {
-    		return null;
-    	}
-    	JSONObject responseJsonObject = null;
-    	if(contentType.isJSONType() && isJSONObject()) {
-    		Optional<JSONObject> responseASJsonObject = responseAsJSONObject();
-    		responseJsonObject = responseASJsonObject.isPresent() ? responseASJsonObject.get() : null; 
-    	}
-    	if(responseJsonObject == null) {
-    		return null;
+    /**
+     * Deserialize a JSON object at a specified key from the HTTP response into a Java object of the given class.
+     * @author <a href="https://www.linkedin.com/in/tariqulislam">Tariqul Islam</a>
+     * <br>
+     * Email: <a href="mailto:sumon.screenfusion@gmail.com">sumon.screenfusion@gmail.com</a>
+     * <br>
+     * @since : Apr 30, 2023 12:39:22 AM
+     *  @param key   The key that represents the JSON object to be deserialized.
+     * @param clazz The class of the Java object to deserialize to.
+     * @return The deserialized Java object, or null if deserialization fails or the key is not found.
+     */
+	public <T> T toDto(String key, Class<T> clazz) {
+		
+	    // Check if the key is empty or if the response is not in JSON format or not a JSON object.
+		if (StringUtil.isBlank(key) || !contentType.isJSONType() || !isJSONObject()) {
+	        return null;
+	    }
+		
+	    // Attempt to retrieve the response as a JSON object.
+		Optional<JSONObject> responseAsJsonObject = responseAsJSONObject();
+		
+	    if (!responseAsJsonObject.isPresent()) {
+	        return null;
+	    }
+	    
+	    JSONObject responseJsonObject = responseAsJsonObject.get();
+	    // Check if the key exists in the JSON object and is a JSON object itself.
+		if (!responseJsonObject.has(key) || !(responseJsonObject.get(key) instanceof JSONObject)) {
+			return null;
 		}
-    	if(!responseJsonObject.has(key) || !(responseJsonObject.get(key) instanceof JSONObject)) {
-    		return null;
-    	}
-    	
-    	JSONObject data = responseJsonObject.getJSONObject(key);
-    	ObjectMapper objectMapper = new ObjectMapper();
-		objectMapper.registerModule(new JavaTimeModule());
-		objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-		objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-		objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+
+	    // Deserialize the JSON object at the specified key into a Java object.
+		JSONObject data = responseJsonObject.getJSONObject(key);
 		
 		try {
-			return  objectMapper.readValue(data.toString(), clazz);
-		} catch (Exception e) { 
-			log.error(Constant.ERROR_LEVEL, e);
+			return mapperConfig.getObjectMapper().readValue(data.toString(), clazz);
+		} catch (IOException e) {
+			log.error("Error deserializing JSON response {}", e);
+			return null;
 		}
-		
-    	return null; 
-    }  
+
+	} 
     
+    /**
+     * Deserialize a JSON array from the response into a list of Java objects of the given class.
+     * @author <a href="https://www.linkedin.com/in/tariqulislam">Tariqul Islam</a>
+     * <br>
+     * Email: <a href="mailto:sumon.screenfusion@gmail.com">sumon.screenfusion@gmail.com</a>
+     * <br>
+     * @since : Apr 30, 2023 12:39:22 AM
+     * @param clazz The class of the Java objects in the list.
+     * @return A list of deserialized Java objects, or an empty list if deserialization fails or the response is not a JSON array.
+     */
     public <T> List<T> toDtos(Class<T> clazz) {
     	
-    	JSONArray responseJsonObject = null;
-    	if(contentType.isJSONType() && isJSONArray()) {
-    		Optional<JSONArray> responseASJsonObject = responseAsJSONArray();
-    		responseJsonObject = responseASJsonObject.isPresent() ? responseASJsonObject.get() : null; 
-    	}
-    	if(responseJsonObject == null) {
+        // Check if the response is not in JSON format or not a JSON array.
+    	if (!contentType.isJSONType() || !isJSONArray()) {
+            return Collections.emptyList();
+        }
+    	
+        // Attempt to retrieve the response as a JSON array.
+    	Optional<JSONArray> responseASJsonObject = responseAsJSONArray();
+    	
+    	if(!responseASJsonObject.isPresent()) {
     		return Collections.emptyList();
 		}
-    	
-    	ObjectMapper objectMapper = new ObjectMapper();
-		objectMapper.registerModule(new JavaTimeModule());
-		objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-		objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-		objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
 		
+        // Deserialize the JSON array into a list of Java objects of the specified class.
 		try {
-			CollectionType listType = objectMapper.getTypeFactory().constructCollectionType(ArrayList.class, clazz);
-			return  objectMapper.readValue(responseJsonObject.toString(), listType);
-		} catch (Exception e) { 
-			log.error(Constant.ERROR_LEVEL, e);
+			ObjectMapper objectMapper = mapperConfig.getObjectMapper();
+			return  objectMapper.readValue(responseASJsonObject.get().toString(), mapperConfig.getListType(clazz)); 
+		} catch (IOException e) { 
+			log.error("Error deserializing JSONArray response {}", e);
+			return Collections.emptyList(); 
 		}
 		
-    	return Collections.emptyList(); 
+    	
     }
     
+    /**
+     * Deserialize the JSON response into a Java object of the given class.
+     * @author <a href="https://www.linkedin.com/in/tariqulislam">Tariqul Islam</a>
+     * <br>
+     * Email: <a href="mailto:sumon.screenfusion@gmail.com">sumon.screenfusion@gmail.com</a>
+     * <br>
+     * @since : Apr 30, 2023 12:39:22 AM
+     * @param clazz The class of the Java object to deserialize to.
+     * @return The deserialized Java object, or null if deserialization fails or the response is not JSON.
+     */
     public <T> T toDto(Class<T> clazz) {
     	
-    	JSONObject responseJsonObject = null;
-    	if(contentType.isJSONType() && isJSONObject()) {
-    		Optional<JSONObject> responseASJsonObject = responseAsJSONObject();
-    		responseJsonObject = responseASJsonObject.isPresent() ? responseASJsonObject.get() : null; 
-    	}
-    	if(responseJsonObject == null) {
-    		return null;
-		}
-    	ObjectMapper objectMapper = new ObjectMapper();
-		objectMapper.registerModule(new JavaTimeModule());
-		objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-		objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-		objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        // Check if the response is not in JSON format or not a JSON object.
+    	if (!contentType.isJSONType() || !isJSONObject()) {
+            return null;
+        }
+    	
+        // Attempt to retrieve the response as a JSON object.
+    	Optional<JSONObject> responseAsJsonObject = responseAsJSONObject();
+    	
+        if (!responseAsJsonObject.isPresent()) {
+            return null;
+        }
+        
+        // Deserialize the JSON object into a Java object of the specified class.
+        try {
+            return mapperConfig.getObjectMapper().readValue(responseAsJsonObject.get().toString(), clazz);
+        } catch (IOException e) {
+            log.error("Error deserializing JSON response {}", e);
+            return null;
+        }
 		
-		try {
-			return  objectMapper.readValue(responseJsonObject.toString(), clazz);
-		} catch (Exception e) { 
-			log.error(Constant.ERROR_LEVEL, e);
-		}
-		
-    	return null; 
     }  
     
 
