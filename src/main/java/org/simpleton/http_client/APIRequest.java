@@ -10,18 +10,24 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Future;
 
+import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.HttpEntityEnclosingRequestBase;
+import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpHead;
 import org.apache.http.client.methods.HttpOptions;
 import org.apache.http.client.methods.HttpPatch;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.methods.HttpPut;
 import org.apache.http.client.methods.HttpTrace;
+import org.apache.http.concurrent.FutureCallback;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.impl.nio.client.CloseableHttpAsyncClient;
+import org.apache.http.impl.nio.client.HttpAsyncClients;
 import org.simpleton.http_client.util.HttpHeaderBuilderHelper;
 import org.simpleton.http_client.util.HttpRequestProcessor;
 import org.simpleton.http_client.util.JSONUtil;
@@ -228,6 +234,37 @@ public class APIRequest implements Request {
         return response;
         
 	}
+	
+	@Override
+	public void get(FutureCallback<HttpResponse> callBack) {
+		CloseableHttpAsyncClient httpClient = HttpAsyncClients.createDefault();
+
+		uri = uriBuildHelper.buildURI(url, pathParams, queryParams);
+
+		if (uri == null) {
+			log.error("error: {}", new StringBuilder(uriBuildHelper.getErrorMessage()));
+			return;
+		}
+
+		boolean valid = requestBodyValidator.isValidRequestBody(contentType, reqeustBody, formParams, attachments);
+		
+		if(!valid) {
+			log.error("error: {}", new StringBuilder().append(requestBodyValidator.getErrorMessage()).append(":").append(MISMATCH_MEDIA_TYPE));
+			return;
+		}
+		
+		httpClient.start();
+		
+		HttpGet request = new HttpGet(uri.toString());
+		
+		headerBuilderHelper.appendHeader(request, headers);
+
+		try {
+			httpClient.execute(request, callBack);
+		} catch (Exception e) {
+			log.error(Constant.ERROR_LEVEL, e);
+		}
+	}
 
 	@Override
 	public APIResponse post() {
@@ -267,6 +304,37 @@ public class APIRequest implements Request {
         return response;
         
 	}
+	
+	@Override
+	public void post(FutureCallback<HttpResponse> callBack) {
+
+		CloseableHttpAsyncClient httpClient = HttpAsyncClients.createDefault();
+
+		uri = uriBuildHelper.buildURI(url, pathParams, queryParams);
+
+		boolean valid = requestBodyValidator.isValidRequestBody(contentType, reqeustBody, formParams, attachments);
+
+		if (!valid) {
+			log.error("error: {}", new StringBuilder().append(requestBodyValidator.getErrorMessage()).append(":").append(MISMATCH_MEDIA_TYPE));
+			return;
+		}
+		
+		httpClient.start();
+
+		HttpPost post = new HttpPost(this.uri.toString());
+
+		headerBuilderHelper.appendHeader(post, headers);
+
+		requestDataBuilder.buildRequestData(post, contentType, formParams, reqeustBody, attachments);
+
+		try {
+
+			httpClient.execute(post, callBack);
+
+		} catch (Exception e) {
+			log.error("");
+		}
+	}
 
 	@Override
 	public APIResponse put() {
@@ -305,6 +373,42 @@ public class APIRequest implements Request {
         return response;
         
 	}
+	
+	@Override
+	public void put(FutureCallback<HttpResponse> callback) {
+		
+		CloseableHttpAsyncClient httpAsyncClient = HttpAsyncClients.createDefault();
+		
+		
+		uri = uriBuildHelper.buildURI(url, pathParams, queryParams);
+		
+		if (uri == null) {
+			return;
+		}
+		
+		boolean valid = requestBodyValidator.isValidRequestBody(contentType, reqeustBody, formParams, attachments);
+		
+		if(!valid) {
+			log.error("error: {}", new StringBuilder().append(requestBodyValidator.getErrorMessage()).append(":").append(MISMATCH_MEDIA_TYPE));
+			return;
+		}
+		
+		httpAsyncClient.start();
+		
+		// Create a HttpPut request
+		HttpPut httpPut = new HttpPut(this.uri.toString());
+		
+		headerBuilderHelper.appendHeader(httpPut, headers); 
+		
+		requestDataBuilder.buildRequestData(httpPut, contentType, formParams, reqeustBody, attachments); 
+		
+		try {
+			httpAsyncClient.execute(httpPut, callback);
+		} catch (Exception e) {
+			log.error(Constant.ERROR_LEVEL, e); 
+		}
+		
+	}
 
 	@Override
 	public APIResponse delete() {
@@ -341,6 +445,42 @@ public class APIRequest implements Request {
 		}
 
         return response;
+	}
+
+	@Override
+	public void delete(FutureCallback<HttpResponse> callback) {
+		
+		CloseableHttpAsyncClient httpAsyncClient = HttpAsyncClients.createDefault();
+		
+		uri = uriBuildHelper.buildURI(url, pathParams, queryParams);
+		
+		if (uri == null) {
+			log.error("error: {}", new StringBuilder(uriBuildHelper.getErrorMessage()));
+			return;
+		}
+		
+		boolean valid = requestBodyValidator.isValidRequestBody(contentType, reqeustBody, formParams, attachments);
+		
+		if(!valid) {
+			log.error("error: {}", new StringBuilder().append(requestBodyValidator.getErrorMessage()).append(":").append(MISMATCH_MEDIA_TYPE));
+			return;
+		}
+		
+		httpAsyncClient.start();
+		
+		// Create a HttpDeleteWithEntity request
+		HttpDeleteWithEntity httpDeleteWithEntity = new HttpDeleteWithEntity(this.uri.toString());
+		
+		headerBuilderHelper.appendHeader(httpDeleteWithEntity, headers); 
+		
+		requestDataBuilder.buildRequestData(httpDeleteWithEntity, contentType, formParams, reqeustBody, attachments); 
+		
+		try (CloseableHttpClient client = initClient();) {
+			httpAsyncClient.execute(httpDeleteWithEntity, callback);
+		} catch (Exception e) {
+			log.error(Constant.ERROR_LEVEL, e);
+		}
+		
 	}
 
 	@Override
@@ -486,6 +626,8 @@ public class APIRequest implements Request {
 	}
 	
 	
+	
+	
 	public static void main(String[] args) {
 	    	
 	    	APIRequest apiRequest = new APIRequest("https://reqres.in");
@@ -494,6 +636,7 @@ public class APIRequest implements Request {
 	    	apiRequest.queryParam("page", "2");
 
 	    	try {
+	    		
 	    		System.out.println("Start Process"); 
 	  			APIResponse apiResponse = apiRequest.get();
 	  			System.out.println("StatusCode: "+apiResponse.getStatus());
@@ -502,6 +645,7 @@ public class APIRequest implements Request {
 	  			System.out.println("responseAsString: "+apiResponse.responseAsString());
 	  			System.out.println("ResponseCharsets: "+apiResponse.getResponseCharsets());
 	  			System.out.println("ResponseData: "+apiResponse.toDtos("data", Student.class));
+
 	  		} catch (Exception e) {
 	  			e.printStackTrace();
 	  			log.error("Error ",e); 

@@ -3,6 +3,9 @@
  */
 package org.simpleton.http_client;
 
+import org.apache.http.HttpResponse;
+import org.apache.http.concurrent.FutureCallback;
+
 /**
  * 
  * @author <a href="https://www.linkedin.com/in/tariqulislam">Tariqul Islam</a>
@@ -34,11 +37,19 @@ interface Request {
 	
 	public APIResponse get();
 	
+	public void get(FutureCallback<HttpResponse> callBack);
+	
 	public APIResponse post();
 	
+	public void post(FutureCallback<HttpResponse> callBack);
+	
 	public APIResponse put();
+
+	public void put(FutureCallback<HttpResponse> callBack);
 	
 	public APIResponse delete();
+
+	public void delete(FutureCallback<HttpResponse> callBack);
 	
 	public APIResponse head();
 	
@@ -47,5 +58,6 @@ interface Request {
 	public APIResponse options();
 	
 	public APIResponse trace();
+	
 
 }
